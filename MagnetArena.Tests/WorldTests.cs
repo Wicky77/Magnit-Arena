@@ -1,12 +1,11 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+﻿using Xunit;
 using MagnetArena.Model;
 
 namespace MagnetArena.Tests
 {
-    [TestClass]
     public class WorldTests
     {
-        [TestMethod]
+        [Fact]
         public void Player_Move_Right_PositionIncreases()
         {
             var world = new World();
@@ -16,10 +15,10 @@ namespace MagnetArena.Tests
             player.Move(Direction.Right, 1.0);
             player.Update();
 
-            Assert.IsTrue(player.Position.X > 0);
+            Assert.True(player.Position.X > 0);
         }
 
-        [TestMethod]
+        [Fact]
         public void Magnet_Pull_ObjectMovesCloser()
         {
             var world = new World();
@@ -33,10 +32,10 @@ namespace MagnetArena.Tests
             box.Update();
 
             var distance = (box.Position - player.Position).Length;
-            Assert.IsTrue(distance < 10);
+            Assert.True(distance < 10);
         }
 
-        [TestMethod]
+        [Fact]
         public void Magnet_Push_ObjectMovesAway()
         {
             var world = new World();
@@ -52,21 +51,21 @@ namespace MagnetArena.Tests
             box.Update();
 
             var newDist = (box.Position - player.Position).Length;
-            Assert.IsTrue(newDist > initialDist);
+            Assert.True(newDist > initialDist);
         }
 
-        [TestMethod]
+        [Fact]
         public void Friction_ObjectEventuallyStops()
         {
             var box = new Box { Position = new Vector2(0, 0), Velocity = new Vector2(10, 10) };
 
             for (int i = 0; i < 50; i++) box.Update();
 
-            Assert.AreEqual(0, box.Velocity.X, 0.01);
-            Assert.AreEqual(0, box.Velocity.Y, 0.01);
+            Assert.Equal(0, box.Velocity.X, precision: 2);
+            Assert.Equal(0, box.Velocity.Y, precision: 2);
         }
 
-        [TestMethod]
+        [Fact]
         public void WinCondition_AllEnemiesInPits()
         {
             var world = new World();
@@ -78,8 +77,8 @@ namespace MagnetArena.Tests
             world.Pits.Add(new Vector2(5, 5));
 
             world.CheckCollisions();
-            Assert.IsTrue(enemy.IsRemoved);
-            Assert.IsTrue(world.CheckWin());
+            Assert.True(enemy.IsRemoved);
+            Assert.True(world.CheckWin());
         }
     }
 }
