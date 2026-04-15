@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MagnitArena.Model/MagnitArena.Model.csproj" Id="01ca2842-95c1-455c-b057-3f7619a229b1" />
+  <Project Path="MagnitArena.Tests/MagnitArena.Tests.csproj" />
+  <Project Path="MagnitArena.View/MagnitArena.View.csproj" Id="b2c3d4e5-f6a7-8901-bcde-f12345678901" />
+</Solution>
