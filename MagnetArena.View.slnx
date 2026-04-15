@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="../MagnetArena.Model/MagnetArena.Model/MagnetArena.Model.csproj" Id="d57b9954-d2aa-4458-803c-8b8a139c913a" />
-  <Project Path="MagnetArena.Tests/MagnetArena.Tests.csproj" Id="f25da56c-2b7d-4d41-85c4-91e875dff68e" />
-  <Project Path="MagnetArena.View/MagnetArena.View.csproj" Id="b843da91-e587-4a91-a544-70bbd905512e" />
-</Solution>
