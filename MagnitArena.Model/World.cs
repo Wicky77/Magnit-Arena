@@ -80,18 +80,20 @@ namespace MagnitArena.Model
                     var x = (int)Math.Round(b.Position.X);
                     var y = (int)Math.Round(b.Position.Y);
                     return Math.Abs(x - px) + Math.Abs(y - py);
-                }).ToList();
+                })
+                .ThenBy(b => b.Position.X)
+                .ThenBy(b => b.Position.Y)
+                .ToList();
 
-            if (!pull) boxes.Reverse();
-
-            foreach (var box in boxes)
+            var box = boxes.FirstOrDefault();
+            if (box != null)
             {
+                int dir = pull ? -1 : 1;
                 for (int i = 0; i < 5; i++)
                 {
-                    if (!MoveBoxOneStep(box, px, py, pull ? -1 : 1))
+                    if (!MoveBoxOneStep(box, px, py, dir))
                         break;
                 }
-                break;
             }
         }
 
@@ -209,6 +211,92 @@ namespace MagnitArena.Model
         {
             if (State != GameState.Playing) return;
 
+            if (Player != null)
+            {
+                var playerPos = new Vector2(
+                    (int)Math.Round(Player.Position.X),
+                    (int)Math.Round(Player.Position.Y)
+                );
+                if (Pits.Contains(playerPos))
+                {
+                    State = GameState.Lost;
+                    return;
+                }
+            }
+
+            foreach (var e in Enemies.Where(o => !o.IsRemoved))
+            {
+                var enemyPos = new Vector2(
+                    (int)Math.Round(e.Position.X),
+                    (int)Math.Round(e.Position.Y)
+                );
+                var playerPos = new Vector2(
+                    (int)Math.Round(Player.Position.X),
+                    (int)Math.Round(Player.Position.Y)
+                );
+                if (enemyPos.X == playerPos.X && enemyPos.Y == playerPos.Y)
+                {
+                    State = GameState.Lost;
+                    return;
+                }
+            }
+
+            foreach (var e in Enemies.Where(o => !o.IsRemoved))
+            {
+                var ex = (int)Math.Round(e.Position.X);
+                var ey = (int)Math.Round(e.Position.Y);
+
+                bool inCorner = (ex == 0 || ex == WIDTH - 1) && (ey == 0 || ey == HEIGHT - 1);
+
+                if (inCorner)
+                {
+                    var pos = new Vector2(ex, ey);
+                    if (!Pits.Contains(pos))
+                    {
+                        State = GameState.Lost;
+                        return;
+                    }
+                }
+
+                bool atEdge = (ex == 0 || ex == WIDTH - 1 || ey == 0 || ey == HEIGHT - 1);
+
+                if (atEdge && !inCorner)
+                {
+                    bool canPushToCenter = true;
+
+                    if (ex == 0)
+                    {
+                        var checkPos = new Vector2(ex + 1, ey);
+                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex + 1 && (int)Math.Round(b.Position.Y) == ey && !b.IsRemoved))
+                            canPushToCenter = false;
+                    }
+                    else if (ex == WIDTH - 1)
+                    {
+                        var checkPos = new Vector2(ex - 1, ey);
+                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex - 1 && (int)Math.Round(b.Position.Y) == ey && !b.IsRemoved))
+                            canPushToCenter = false;
+                    }
+                    else if (ey == 0)
+                    {
+                        var checkPos = new Vector2(ex, ey + 1);
+                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex && (int)Math.Round(b.Position.Y) == ey + 1 && !b.IsRemoved))
+                            canPushToCenter = false;
+                    }
+                    else if (ey == HEIGHT - 1)
+                    {
+                        var checkPos = new Vector2(ex, ey - 1);
+                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex && (int)Math.Round(b.Position.Y) == ey - 1 && !b.IsRemoved))
+                            canPushToCenter = false;
+                    }
+
+                    if (!canPushToCenter)
+                    {
+                        State = GameState.Lost;
+                        return;
+                    }
+                }
+            }
+
             foreach (var e in Enemies.ToList())
             {
                 if (e.IsRemoved) continue;
@@ -224,21 +312,23 @@ namespace MagnitArena.Model
 
         private void CheckWinCondition()
         {
+            if (State == GameState.Lost) return;
+
             if (Enemies.Any(e => !e.IsRemoved))
             {
                 State = GameState.Playing;
                 return;
             }
 
-            var boxes = Boxes.Count(b => !b.IsRemoved);
-            if (boxes == 0)
+            var boxes = Boxes.Where(b => !b.IsRemoved).ToList();
+            if (boxes.Count == 0)
             {
                 State = GameState.Playing;
                 return;
             }
 
             int inZone = 0;
-            foreach (var b in Boxes.Where(o => !o.IsRemoved))
+            foreach (var b in boxes)
             {
                 var p = new Vector2(
                     (int)Math.Round(b.Position.X),
@@ -247,7 +337,7 @@ namespace MagnitArena.Model
                 if (Zones.Contains(p)) inZone++;
             }
 
-            State = (inZone == boxes && inZone == Zones.Count)
+            State = (inZone == boxes.Count && inZone == Zones.Count)
                 ? GameState.Won
                 : GameState.Playing;
         }

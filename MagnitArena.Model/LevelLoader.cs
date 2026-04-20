@@ -52,21 +52,34 @@ namespace MagnitArena.Model
                 walls[x, 3] = 1;
                 walls[x, 11] = 1;
             }
+            walls[10, 7] = 1;
+
             var pits = new int[20, 15];
             pits[18, 3] = 1;
             pits[18, 11] = 1;
+
             var zones = new int[20, 15];
             zones[15, 3] = 1;
             zones[15, 7] = 1;
             zones[15, 11] = 1;
+
             return new Level
             {
                 Walls = walls,
                 Pits = pits,
                 Zones = zones,
                 PlayerStart = new Vector2(2, 7),
-                BoxStarts = new List<Vector2> { new Vector2(8, 7) },
-                EnemyStarts = new List<Vector2> { new Vector2(12, 3), new Vector2(12, 11) }
+                BoxStarts = new List<Vector2>
+        {
+            new Vector2(8, 3),   // ← ЯЩИК 1
+            new Vector2(8, 7),   // ← ЯЩИК 2
+            new Vector2(8, 11)   // ← ЯЩИК 3
+        },
+                EnemyStarts = new List<Vector2>
+        {
+            new Vector2(12, 2),
+            new Vector2(12, 12)
+        }
             };
         }
     }

@@ -14,9 +14,18 @@ namespace MagnitArena.View
         private Label _status;
         private Label _level;
 
+        public event EventHandler BackToMenu;
+        public event EventHandler GameExited;
+
+        private Panel _pauseOverlay;
+        private Panel _winOverlay;
+        private Panel _loseOverlay;
+        private Label _hintLabel;
+
         public Form1()
         {
             SetupUI();
+            SetupOverlays();
             InitGame();
         }
 
@@ -62,7 +71,143 @@ namespace MagnitArena.View
 
             this.KeyDown += Form1_KeyDown;
 
+            this.FormClosing += (s, e) =>
+            {
+                e.Cancel = true;
+                GoToMainMenu();
+            };
+
             this.ResumeLayout();
+        }
+
+        private void SetupOverlays()
+        {
+            _hintLabel = new Label
+            {
+                Text = "Q — оттолкнуть | E — притянуть | Esc — пауза",
+                Font = new Font("Arial", 10),
+                ForeColor = Color.Gray,
+                Location = new Point(10, 10),
+                AutoSize = true,
+                BackColor = Color.FromArgb(30, 30, 30, 200)
+            };
+            _hintLabel.Padding = new Padding(10, 5, 10, 5);
+            this.Controls.Add(_hintLabel);
+            _hintLabel.BringToFront();
+
+            _pauseOverlay = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(0, 0, 0, 180),
+                Visible = false
+            };
+
+            var pauseTitle = new Label
+            {
+                Text = "⏸ ПАУЗА",
+                Font = new Font("Arial", 28, FontStyle.Bold),
+                ForeColor = Color.Yellow,
+                Location = new Point(275, 200),
+                AutoSize = true
+            };
+
+            var btnResume = new Button
+            {
+                Text = "▶ ПРОДОЛЖИТЬ",
+                Font = new Font("Arial", 16),
+                Location = new Point(275, 300),
+                Size = new Size(250, 50),
+                BackColor = Color.FromArgb(0, 120, 215),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnResume.FlatAppearance.BorderSize = 2;
+            btnResume.FlatAppearance.BorderColor = Color.Cyan;
+            btnResume.Click += (s, e) => ResumeGame();
+
+            var btnMenuPause = new Button
+            {
+                Text = "🏠 В МЕНЮ",
+                Font = new Font("Arial", 16),
+                Location = new Point(275, 370),
+                Size = new Size(250, 50),
+                BackColor = Color.FromArgb(180, 30, 30),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnMenuPause.FlatAppearance.BorderSize = 2;
+            btnMenuPause.Click += (s, e) => GoToMainMenuFromPause();
+
+            _pauseOverlay.Controls.Add(pauseTitle);
+            _pauseOverlay.Controls.Add(btnResume);
+            _pauseOverlay.Controls.Add(btnMenuPause);
+            this.Controls.Add(_pauseOverlay);
+
+            _winOverlay = CreateResultOverlay("🏆 ПОБЕДА!", Color.Lime, "▶ СЛЕДУЮЩИЙ УРОВЕНЬ", "🏠 В МЕНЮ");
+            _winOverlay.Controls.Find("btnAction", true)[0].Click += (s, e) => NextLevel();
+            _winOverlay.Controls.Find("btnMenu", true)[0].Click += (s, e) => GoToMainMenu();
+            this.Controls.Add(_winOverlay);
+
+            _loseOverlay = CreateResultOverlay("💀 ПОРАЖЕНИЕ", Color.OrangeRed, "🔄 РЕСТАРТ", "🏠 В МЕНЮ");
+            _loseOverlay.Controls.Find("btnAction", true)[0].Click += (s, e) => RestartLevel();
+            _loseOverlay.Controls.Find("btnMenu", true)[0].Click += (s, e) => GoToMainMenu();
+            this.Controls.Add(_loseOverlay);
+        }
+
+        private Panel CreateResultOverlay(string title, Color titleColor, string btnActionText, string btnMenuText)
+        {
+            var panel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(0, 0, 0, 200),
+                Visible = false
+            };
+
+            var lblTitle = new Label
+            {
+                Name = "lblTitle",
+                Text = title,
+                Font = new Font("Arial", 32, FontStyle.Bold),
+                ForeColor = titleColor,
+                Location = new Point(225, 180),
+                AutoSize = true
+            };
+
+            var btnAction = new Button
+            {
+                Name = "btnAction",
+                Text = btnActionText,
+                Font = new Font("Arial", 16),
+                Location = new Point(275, 300),
+                Size = new Size(250, 50),
+                BackColor = titleColor == Color.Lime ? Color.FromArgb(0, 120, 215) : Color.FromArgb(180, 30, 30),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnAction.FlatAppearance.BorderSize = 2;
+
+            var btnMenu = new Button
+            {
+                Name = "btnMenu",
+                Text = btnMenuText,
+                Font = new Font("Arial", 16),
+                Location = new Point(275, 370),
+                Size = new Size(250, 50),
+                BackColor = Color.FromArgb(100, 100, 100),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnMenu.FlatAppearance.BorderSize = 2;
+
+            panel.Controls.Add(lblTitle);
+            panel.Controls.Add(btnAction);
+            panel.Controls.Add(btnMenu);
+
+            return panel;
         }
 
         private void InitGame()
@@ -85,13 +230,25 @@ namespace MagnitArena.View
         {
             if (_world.State == GameState.Won)
             {
-                _status.Text = "ПОБЕДА! Нажмите N";
+                _status.Text = "ПОБЕДА!";
                 _status.ForeColor = Color.Lime;
+                if (!_winOverlay.Visible)
+                {
+                    _winOverlay.Visible = true;
+                    _winOverlay.BringToFront();
+                    _timer.Stop();
+                }
             }
             else if (_world.State == GameState.Lost)
             {
-                _status.Text = "ПОРАЖЕНИЕ! Нажмите R";
-                _status.ForeColor = Color.Red;
+                _status.Text = "ПОРАЖЕНИЕ!";
+                _status.ForeColor = Color.OrangeRed;
+                if (!_loseOverlay.Visible)
+                {
+                    _loseOverlay.Visible = true;
+                    _loseOverlay.BringToFront();
+                    _timer.Stop();
+                }
             }
             else
             {
@@ -170,21 +327,28 @@ namespace MagnitArena.View
 
         private void Form1_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode == Keys.Escape)
+            {
+                if (_pauseOverlay.Visible)
+                {
+                    ResumeGame();
+                }
+                else if (_winOverlay.Visible || _loseOverlay.Visible)
+                {
+                    GoToMainMenu();
+                }
+                else
+                {
+                    _pauseOverlay.Visible = true;
+                    _pauseOverlay.BringToFront();
+                    _timer.Stop();
+                }
+                e.Handled = true;
+                return;
+            }
+
+            if (_pauseOverlay.Visible || _winOverlay.Visible || _loseOverlay.Visible) return;
             if (_world.Player == null) return;
-
-            if (_world.State == GameState.Won && e.KeyCode == Keys.N)
-            {
-                _world.NextLevel();
-                Invalidate();
-                return;
-            }
-
-            if (_world.State == GameState.Lost && e.KeyCode == Keys.R)
-            {
-                _world.RestartLevel();
-                Invalidate();
-                return;
-            }
 
             int x = (int)Math.Round(_world.Player.Position.X);
             int y = (int)Math.Round(_world.Player.Position.Y);
@@ -225,8 +389,7 @@ namespace MagnitArena.View
             }
             else if (e.KeyCode == Keys.R)
             {
-                _world.RestartLevel();
-                Invalidate();
+                RestartLevel();
                 return;
             }
             else return;
@@ -261,6 +424,61 @@ namespace MagnitArena.View
             }
 
             return true;
+        }
+
+        private void ResumeGame()
+        {
+            _pauseOverlay.Visible = false;
+            _timer.Start();
+        }
+
+        private void GoToMainMenu()
+        {
+            _timer.Stop();
+            _pauseOverlay.Visible = false;
+            _winOverlay.Visible = false;
+            _loseOverlay.Visible = false;
+            BackToMenu?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void GoToMainMenuFromPause()
+        {
+            _pauseOverlay.Visible = false;
+            _timer.Stop();
+            this.Hide();
+            BackToMenu?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void NextLevel()
+        {
+            _winOverlay.Visible = false;
+            if (_world.CurrentLevel < _world.TotalLevels)
+            {
+                _world.LoadLevel(_world.CurrentLevel);
+                _timer.Start();
+            }
+            else
+            {
+                GoToMainMenu();
+            }
+        }
+
+        private void RestartLevel()
+        {
+            _loseOverlay.Visible = false;
+            _world.RestartLevel();
+            _timer.Start();
+        }
+
+        public void RestartGame()
+        {
+            _world = new World();
+            _world.LoadLevel(0);
+            _pauseOverlay.Visible = false;
+            _winOverlay.Visible = false;
+            _loseOverlay.Visible = false;
+            _timer.Start();
+            Invalidate();
         }
     }
 }
