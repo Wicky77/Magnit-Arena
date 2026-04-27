@@ -1,13 +1,21 @@
-﻿using System;
+﻿using MagnitArena.Model;
+using System;
+using System.Collections.Generic;
 using System.Drawing;
-using System.Windows.Forms;
-using MagnitArena.Model;
 using System.Linq;
+using System.Windows.Forms;
 
 namespace MagnitArena.View
 {
     public partial class Form1 : Form
     {
+        private bool _soundInitialized = false;
+        private List<MagnetLine> _magnetLines = new List<MagnetLine>();
+        private DateTime _lastMagnetTime = DateTime.MinValue;
+        private Dictionary<GameObject, DateTime> _blinkingObjects = new Dictionary<GameObject, DateTime>();
+        private HashSet<Keys> _pressedKeys = new HashSet<Keys>();
+        private Dictionary<Keys, DateTime> _keyPressStartTime = new Dictionary<Keys, DateTime>();
+
         private World _world;
         private Timer _timer;
         private const int CELL = 40;
@@ -15,7 +23,6 @@ namespace MagnitArena.View
         private Label _level;
 
         public event EventHandler BackToMenu;
-        public event EventHandler GameExited;
 
         private Panel _pauseOverlay;
         private Panel _winOverlay;
@@ -70,6 +77,7 @@ namespace MagnitArena.View
             };
 
             this.KeyDown += Form1_KeyDown;
+            this.KeyUp += Form1_KeyUp;
 
             this.FormClosing += (s, e) =>
             {
@@ -138,7 +146,7 @@ namespace MagnitArena.View
                 Cursor = Cursors.Hand
             };
             btnMenuPause.FlatAppearance.BorderSize = 2;
-            btnMenuPause.Click += (s, e) => GoToMainMenuFromPause();
+            btnMenuPause.Click += (s, e) => GoToMainMenu();
 
             _pauseOverlay.Controls.Add(pauseTitle);
             _pauseOverlay.Controls.Add(btnResume);
@@ -212,18 +220,57 @@ namespace MagnitArena.View
 
         private void InitGame()
         {
+            if (!_soundInitialized)
+            {
+                SoundManager.Initialize();
+                _soundInitialized = true;
+            }
+
             _world = new World();
             _world.LoadLevel(0);
+            _world.BoxMoved += (s, e) =>
+            {
+                SoundManager.PlayHit();
+                SoundManager.StopMagnet();
+            };
 
             _timer = new Timer { Interval = 30 };
             _timer.Tick += (s, e) =>
             {
                 _world.Update();
                 _world.CheckCollisions();
+
+                foreach (var key in _pressedKeys.ToList())
+                {
+                    if (IsMovementKey(key) && _keyPressStartTime.ContainsKey(key))
+                    {
+                        var duration = (DateTime.Now - _keyPressStartTime[key]).TotalMilliseconds;
+                        if (duration >= 500)
+                        {
+                            SoundManager.PlayStep1();
+                            _keyPressStartTime[key] = DateTime.Now;
+                        }
+                    }
+                }
+
+                if (_world.MagnetBlocked)
+                {
+                    SoundManager.PlayHit();
+                    _world.ResetMagnetBlocked();
+                }
+
+                UpdateBlinkingEffects();
+                UpdateMagnetLines();
                 UpdateStatus();
                 Invalidate();
             };
             _timer.Start();
+        }
+
+        private bool IsMovementKey(Keys key)
+        {
+            return key == Keys.Up || key == Keys.Down || key == Keys.Left || key == Keys.Right ||
+                   key == Keys.W || key == Keys.S || key == Keys.A || key == Keys.D;
         }
 
         private void UpdateStatus()
@@ -234,6 +281,8 @@ namespace MagnitArena.View
                 _status.ForeColor = Color.Lime;
                 if (!_winOverlay.Visible)
                 {
+                    SoundManager.StopMagnet();
+                    SoundManager.PlayWin();
                     _winOverlay.Visible = true;
                     _winOverlay.BringToFront();
                     _timer.Stop();
@@ -245,6 +294,9 @@ namespace MagnitArena.View
                 _status.ForeColor = Color.OrangeRed;
                 if (!_loseOverlay.Visible)
                 {
+                    SoundManager.StopMagnet();
+                    SoundManager.PlayHit();
+                    SoundManager.PlayLose();
                     _loseOverlay.Visible = true;
                     _loseOverlay.BringToFront();
                     _timer.Stop();
@@ -296,23 +348,49 @@ namespace MagnitArena.View
             foreach (var b in _world.Boxes.Where(o => !o.IsRemoved))
             {
                 var r = Rect(b.Position);
-                g.FillRectangle(Brushes.Yellow, r);
-                g.DrawRectangle(Pens.Gold, r);
+
+                if (IsBlinking(b))
+                {
+                    g.FillRectangle(Brushes.White, r);
+                }
+                else
+                {
+                    g.FillRectangle(Brushes.Yellow, r);
+                    g.DrawRectangle(Pens.Gold, r);
+                }
             }
 
             foreach (var e in _world.Enemies.Where(o => !o.IsRemoved))
             {
                 var r = Rect(e.Position);
-                g.FillRectangle(Brushes.Red, r);
-                g.DrawRectangle(Pens.DarkRed, r);
+
+                if (IsBlinking(e))
+                {
+                    g.FillRectangle(Brushes.Pink, r);
+                }
+                else
+                {
+                    g.FillRectangle(Brushes.Red, r);
+                    g.DrawRectangle(Pens.DarkRed, r);
+                }
             }
 
             if (_world.Player != null)
             {
                 var r = Rect(_world.Player.Position);
-                g.FillRectangle(Brushes.Lime, r);
-                g.DrawRectangle(Pens.Green, r);
+
+                if (IsBlinking(_world.Player))
+                {
+                    g.FillRectangle(Brushes.White, r);
+                }
+                else
+                {
+                    g.FillRectangle(Brushes.Lime, r);
+                    g.DrawRectangle(Pens.Green, r);
+                }
             }
+
+            DrawMagnetLines(g);
         }
 
         private Rectangle Rect(Vector2 p)
@@ -330,18 +408,15 @@ namespace MagnitArena.View
             if (e.KeyCode == Keys.Escape)
             {
                 if (_pauseOverlay.Visible)
-                {
                     ResumeGame();
-                }
                 else if (_winOverlay.Visible || _loseOverlay.Visible)
-                {
                     GoToMainMenu();
-                }
                 else
                 {
                     _pauseOverlay.Visible = true;
                     _pauseOverlay.BringToFront();
                     _timer.Stop();
+                    SoundManager.StopMagnet();
                 }
                 e.Handled = true;
                 return;
@@ -350,41 +425,28 @@ namespace MagnitArena.View
             if (_pauseOverlay.Visible || _winOverlay.Visible || _loseOverlay.Visible) return;
             if (_world.Player == null) return;
 
-            int x = (int)Math.Round(_world.Player.Position.X);
-            int y = (int)Math.Round(_world.Player.Position.Y);
-            int nx = x, ny = y;
-            bool move = false;
-
-            if (e.KeyCode == Keys.Up || e.KeyCode == Keys.W)
+            if (e.KeyCode == Keys.Q)
             {
-                ny = y - 1;
-                move = true;
-            }
-            else if (e.KeyCode == Keys.Down || e.KeyCode == Keys.S)
-            {
-                ny = y + 1;
-                move = true;
-            }
-            else if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A)
-            {
-                nx = x - 1;
-                move = true;
-            }
-            else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.D)
-            {
-                nx = x + 1;
-                move = true;
-            }
-            else if (e.KeyCode == Keys.Q)
-            {
-                _world.ApplyMagnetForce(false);
-                Invalidate();
+                if (_world.CanUseMagnet())
+                {
+                    _lastMagnetTime = DateTime.Now;
+                    CreateMagnetLines(false);
+                    _world.ApplyMagnetForce(false);
+                    SoundManager.StartMagnet();
+                    Invalidate();
+                }
                 return;
             }
             else if (e.KeyCode == Keys.E)
             {
-                _world.ApplyMagnetForce(true);
-                Invalidate();
+                if (_world.CanUseMagnet())
+                {
+                    _lastMagnetTime = DateTime.Now;
+                    CreateMagnetLines(true);
+                    _world.ApplyMagnetForce(true);
+                    SoundManager.StartMagnet();
+                    Invalidate();
+                }
                 return;
             }
             else if (e.KeyCode == Keys.R)
@@ -392,12 +454,41 @@ namespace MagnitArena.View
                 RestartLevel();
                 return;
             }
-            else return;
 
-            if (move && CanMove(nx, ny))
+            if (IsMovementKey(e.KeyCode))
             {
-                _world.Player.Position = new Vector2(nx, ny);
-                Invalidate();
+                if (!_pressedKeys.Contains(e.KeyCode))
+                {
+                    _keyPressStartTime[e.KeyCode] = DateTime.Now;
+                    SoundManager.PlayStep1();
+                }
+                _pressedKeys.Add(e.KeyCode);
+
+                int x = (int)Math.Round(_world.Player.Position.X);
+                int y = (int)Math.Round(_world.Player.Position.Y);
+                int nx = x, ny = y;
+                bool move = false;
+
+                if (e.KeyCode == Keys.Up || e.KeyCode == Keys.W) { ny = y - 1; move = true; }
+                else if (e.KeyCode == Keys.Down || e.KeyCode == Keys.S) { ny = y + 1; move = true; }
+                else if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A) { nx = x - 1; move = true; }
+                else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.D) { nx = x + 1; move = true; }
+
+                if (move && CanMove(nx, ny) && _world.CanPlayerMove())
+                {
+                    _world.Player.Position = new Vector2(nx, ny);
+                    _world.RegisterPlayerMove();
+                    Invalidate();
+                }
+            }
+        }
+
+        private void Form1_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (IsMovementKey(e.KeyCode))
+            {
+                _pressedKeys.Remove(e.KeyCode);
+                _keyPressStartTime.Remove(e.KeyCode);
             }
         }
 
@@ -438,13 +529,7 @@ namespace MagnitArena.View
             _pauseOverlay.Visible = false;
             _winOverlay.Visible = false;
             _loseOverlay.Visible = false;
-            BackToMenu?.Invoke(this, EventArgs.Empty);
-        }
-
-        private void GoToMainMenuFromPause()
-        {
-            _pauseOverlay.Visible = false;
-            _timer.Stop();
+            SoundManager.StopMagnet();
             this.Hide();
             BackToMenu?.Invoke(this, EventArgs.Empty);
         }
@@ -477,8 +562,87 @@ namespace MagnitArena.View
             _pauseOverlay.Visible = false;
             _winOverlay.Visible = false;
             _loseOverlay.Visible = false;
+            SoundManager.StopMagnet();
             _timer.Start();
             Invalidate();
         }
+
+        private void CreateMagnetLines(bool pull)
+        {
+            _magnetLines.Clear();
+
+            if (_world.Player == null) return;
+
+            var px = (int)Math.Round(_world.Player.Position.X);
+            var py = (int)Math.Round(_world.Player.Position.Y);
+
+            foreach (var box in _world.Boxes.Where(b => !b.IsRemoved))
+            {
+                var bx = (int)Math.Round(box.Position.X);
+                var by = (int)Math.Round(box.Position.Y);
+
+                _magnetLines.Add(new MagnetLine
+                {
+                    Start = new Point(px * CELL + CELL / 2, py * CELL + CELL / 2),
+                    End = new Point(bx * CELL + CELL / 2, by * CELL + CELL / 2),
+                    Pull = pull,
+                    CreatedAt = DateTime.Now
+                });
+            }
+        }
+
+        private void UpdateMagnetLines()
+        {
+            _magnetLines.RemoveAll(l => (DateTime.Now - l.CreatedAt).TotalMilliseconds > 500);
+        }
+
+        private void AddBlinkingEffect(GameObject obj)
+        {
+            if (!_blinkingObjects.ContainsKey(obj))
+            {
+                _blinkingObjects[obj] = DateTime.Now;
+            }
+        }
+
+        private void UpdateBlinkingEffects()
+        {
+            var toRemove = _blinkingObjects
+                .Where(kvp => (DateTime.Now - kvp.Value).TotalMilliseconds > 1000)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var obj in toRemove)
+            {
+                _blinkingObjects.Remove(obj);
+            }
+        }
+
+        private void DrawMagnetLines(Graphics g)
+        {
+            foreach (var line in _magnetLines)
+            {
+                using (var pen = new Pen(line.Pull ? Color.Lime : Color.Orange, 2))
+                {
+                    pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                    g.DrawLine(pen, line.Start, line.End);
+                }
+            }
+        }
+
+        private bool IsBlinking(GameObject obj)
+        {
+            if (!_blinkingObjects.ContainsKey(obj)) return false;
+
+            var elapsed = (DateTime.Now - _blinkingObjects[obj]).TotalMilliseconds;
+            return ((int)elapsed / 100) % 2 == 0;
+        }
+    }
+
+    public class MagnetLine
+    {
+        public Point Start { get; set; }
+        public Point End { get; set; }
+        public bool Pull { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 }

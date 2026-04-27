@@ -8,6 +8,10 @@ namespace MagnitArena.Model
     public class World
     {
         public const int WIDTH = 20, HEIGHT = 15;
+
+        public const int MAGNET_STRENGTH = 4;
+        public const int MAGNET_COOLDOWN_MS = 200;
+
         public Player Player { get; private set; }
         public List<Box> Boxes { get; private set; } = new List<Box>();
         public List<Enemy> Enemies { get; private set; } = new List<Enemy>();
@@ -17,6 +21,14 @@ namespace MagnitArena.Model
         public GameState State { get; set; } = GameState.Playing;
         public int CurrentLevel { get; private set; } = 1;
         public int TotalLevels { get; private set; } = 3;
+
+        public bool IsBoxMoving { get; private set; } = false;
+        public bool MagnetBlocked { get; private set; } = false;
+
+        public event EventHandler BoxMoved;
+
+        private DateTime _lastMagnetUse = DateTime.MinValue;
+        private DateTime _lastPlayerMove = DateTime.MinValue;
 
         public void SetPlayer(Player p) => Player = p;
 
@@ -44,6 +56,10 @@ namespace MagnitArena.Model
             foreach (var b in lvl.BoxStarts) Boxes.Add(new Box { Position = b });
             foreach (var e in lvl.EnemyStarts) Enemies.Add(new Enemy { Position = e });
             State = GameState.Playing;
+            _lastMagnetUse = DateTime.MinValue;
+            _lastPlayerMove = DateTime.MinValue;
+            IsBoxMoving = false;
+            MagnetBlocked = false;
         }
 
         public void Update()
@@ -69,9 +85,20 @@ namespace MagnitArena.Model
             o.Position = p;
         }
 
-        public void ApplyMagnetForce(bool pull, double force = 5.0)
+        public bool CanUseMagnet()
+        {
+            return (DateTime.Now - _lastMagnetUse).TotalMilliseconds >= MAGNET_COOLDOWN_MS;
+        }
+
+        public void ApplyMagnetForce(bool pull, int strength = MAGNET_STRENGTH)
         {
             if (Player == null || State != GameState.Playing) return;
+            if (!CanUseMagnet()) return;
+
+            _lastMagnetUse = DateTime.Now;
+            IsBoxMoving = false;
+            MagnetBlocked = false;
+
             var px = (int)Math.Round(Player.Position.X);
             var py = (int)Math.Round(Player.Position.Y);
 
@@ -89,10 +116,22 @@ namespace MagnitArena.Model
             if (box != null)
             {
                 int dir = pull ? -1 : 1;
-                for (int i = 0; i < 5; i++)
+                int movedSteps = 0;
+
+                for (int i = 0; i < strength; i++)
                 {
                     if (!MoveBoxOneStep(box, px, py, dir))
+                    {
+                        MagnetBlocked = true;
                         break;
+                    }
+                    movedSteps++;
+                    IsBoxMoving = true;
+                }
+
+                if (movedSteps > 0)
+                {
+                    BoxMoved?.Invoke(this, EventArgs.Empty);
                 }
             }
         }
@@ -205,6 +244,21 @@ namespace MagnitArena.Model
             }
 
             return true;
+        }
+
+        public void RegisterPlayerMove()
+        {
+            _lastPlayerMove = DateTime.Now;
+        }
+
+        public bool CanPlayerMove()
+        {
+            return (DateTime.Now - _lastPlayerMove).TotalMilliseconds >= 150;
+        }
+
+        public void ResetMagnetBlocked()
+        {
+            MagnetBlocked = false;
         }
 
         public void CheckCollisions()
