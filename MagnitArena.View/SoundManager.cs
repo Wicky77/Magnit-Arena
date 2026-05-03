@@ -1,86 +1,41 @@
 ﻿using System;
 using System.IO;
 using System.Media;
-using System.Timers;
-using System.Diagnostics;
+using MagnitArena.Model;
 
 namespace MagnitArena.View
 {
     public static class SoundManager
     {
-        private static SoundPlayer _step1Sound;
-        private static SoundPlayer _hitSound;
-        private static SoundPlayer _winSound;
-        private static SoundPlayer _loseSound;
-        private static SoundPlayer _magnetSound;
-
-        private static Timer _magnetTimer;
+        private static SoundPlayer _step1, _hit, _win, _lose, _magnet;
+        private static System.Timers.Timer _magnetTimer;
         private static bool _magnetPlaying = false;
+        private static SoundSettings _settings;
 
         public static void Initialize()
         {
-            string soundPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Sounds");
-
-            if (Directory.Exists(soundPath))
+            _settings = SoundSettings.Load();
+            string p = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Sounds");
+            if (Directory.Exists(p))
             {
-                LoadSound("step1.wav", ref _step1Sound);
-                LoadSound("hit.wav", ref _hitSound);
-                LoadSound("win.wav", ref _winSound);
-                LoadSound("lose.wav", ref _loseSound);
-                LoadSound("magnet.wav", ref _magnetSound);
+                Load("step1.wav", ref _step1, p); Load("hit.wav", ref _hit, p);
+                Load("win.wav", ref _win, p); Load("lose.wav", ref _lose, p);
+                Load("magnet.wav", ref _magnet, p);
             }
-
-            _magnetTimer = new Timer(2000);
-            _magnetTimer.AutoReset = false;
+            _magnetTimer = new System.Timers.Timer(2000) { AutoReset = false };
             _magnetTimer.Elapsed += (s, e) => StopMagnet();
         }
+        private static void Load(string f, ref SoundPlayer sp, string d) { string fp = Path.Combine(d, f); if (File.Exists(fp)) { sp = new SoundPlayer(fp); sp.Load(); } }
 
-        private static void LoadSound(string fileName, ref SoundPlayer player)
-        {
-            string soundPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Sounds", fileName);
-            if (File.Exists(soundPath))
-            {
-                player = new SoundPlayer(soundPath);
-                player.Load();
-            }
-        }
+        public static void SetSettings(SoundSettings s) { _settings = s; _settings.Save(); }
+        public static SoundSettings GetSettings() { if (_settings == null) _settings = SoundSettings.Load(); return _settings; }
 
-        public static void PlayStep1()
-        {
-            if (_step1Sound != null)
-            {
-                _step1Sound.Stop();
-                _step1Sound.Play();
-            }
-        }
-
-        public static void StartMagnet()
-        {
-            if (_magnetSound != null && !_magnetPlaying)
-            {
-                _magnetSound.Play();
-                _magnetPlaying = true;
-                _magnetTimer.Stop();
-                _magnetTimer.Start();
-            }
-        }
-
-        public static void StopMagnet()
-        {
-            if (_magnetSound != null && _magnetPlaying)
-            {
-                _magnetSound.Stop();
-                _magnetPlaying = false;
-                _magnetTimer.Stop();
-            }
-        }
-
-        public static void StopAllStepSounds()
-        {
-        }
-
-        public static void PlayHit() => _hitSound?.Play();
-        public static void PlayWin() => _winSound?.Play();
-        public static void PlayLose() => _loseSound?.Play();
+        public static void PlayStep1() { if (_settings != null && _settings.Muted != true && _step1 != null) _step1.Play(); }
+        public static void PlayHit() { if (_settings != null && _settings.Muted != true && _hit != null) _hit.Play(); }
+        public static void PlayWin() { if (_settings != null && _settings.Muted != true && _win != null) _win.Play(); }
+        public static void PlayLose() { if (_settings != null && _settings.Muted != true && _lose != null) _lose.Play(); }
+        public static void StartMagnet() { if (_settings != null && _settings.Muted != true && _magnet != null && !_magnetPlaying) { _magnet.Play(); _magnetPlaying = true; _magnetTimer.Stop(); _magnetTimer.Start(); } }
+        public static void StopMagnet() { if (_magnet != null && _magnetPlaying) { _magnet.Stop(); _magnetPlaying = false; _magnetTimer.Stop(); } }
+        public static void StopAllStepSounds() { }
     }
 }

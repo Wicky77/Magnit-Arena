@@ -71,9 +71,9 @@ namespace MagnitArena.Model
                 PlayerStart = new Vector2(2, 7),
                 BoxStarts = new List<Vector2>
         {
-            new Vector2(8, 3),   // ← ЯЩИК 1
-            new Vector2(8, 7),   // ← ЯЩИК 2
-            new Vector2(8, 11)   // ← ЯЩИК 3
+            new Vector2(4, 3),  
+            new Vector2(8, 7),   
+            new Vector2(4, 11)  
         },
                 EnemyStarts = new List<Vector2>
         {

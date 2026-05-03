@@ -1,14 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Drawing;
 
 namespace MagnitArena.Model
 {
     public class World
     {
         public const int WIDTH = 20, HEIGHT = 15;
-
         public const int MAGNET_STRENGTH = 4;
         public const int MAGNET_COOLDOWN_MS = 200;
 
@@ -26,6 +24,8 @@ namespace MagnitArena.Model
         public bool MagnetBlocked { get; private set; } = false;
 
         public event EventHandler BoxMoved;
+        public event EventHandler<BoxHitEventArgs> BoxHit;
+        public event EventHandler<GameObject> ObjectBlinking;
 
         private DateTime _lastMagnetUse = DateTime.MinValue;
         private DateTime _lastPlayerMove = DateTime.MinValue;
@@ -38,11 +38,7 @@ namespace MagnitArena.Model
             if (idx < 0 || idx >= levels.Count) return;
             var lvl = levels[idx];
             CurrentLevel = idx + 1;
-            Boxes.Clear();
-            Enemies.Clear();
-            Walls.Clear();
-            Pits.Clear();
-            Zones.Clear();
+            Boxes.Clear(); Enemies.Clear(); Walls.Clear(); Pits.Clear(); Zones.Clear();
 
             for (int x = 0; x < 20; x++)
                 for (int y = 0; y < 15; y++)
@@ -55,6 +51,7 @@ namespace MagnitArena.Model
             Player = new Player { Position = lvl.PlayerStart };
             foreach (var b in lvl.BoxStarts) Boxes.Add(new Box { Position = b });
             foreach (var e in lvl.EnemyStarts) Enemies.Add(new Enemy { Position = e });
+
             State = GameState.Playing;
             _lastMagnetUse = DateTime.MinValue;
             _lastPlayerMove = DateTime.MinValue;
@@ -85,15 +82,11 @@ namespace MagnitArena.Model
             o.Position = p;
         }
 
-        public bool CanUseMagnet()
-        {
-            return (DateTime.Now - _lastMagnetUse).TotalMilliseconds >= MAGNET_COOLDOWN_MS;
-        }
+        public bool CanUseMagnet() => (DateTime.Now - _lastMagnetUse).TotalMilliseconds >= MAGNET_COOLDOWN_MS;
 
         public void ApplyMagnetForce(bool pull, int strength = MAGNET_STRENGTH)
         {
-            if (Player == null || State != GameState.Playing) return;
-            if (!CanUseMagnet()) return;
+            if (Player == null || State != GameState.Playing || !CanUseMagnet()) return;
 
             _lastMagnetUse = DateTime.Now;
             IsBoxMoving = false;
@@ -103,35 +96,38 @@ namespace MagnitArena.Model
             var py = (int)Math.Round(Player.Position.Y);
 
             var boxes = Boxes.Where(b => !b.IsRemoved)
-                .OrderBy(b => {
-                    var x = (int)Math.Round(b.Position.X);
-                    var y = (int)Math.Round(b.Position.Y);
-                    return Math.Abs(x - px) + Math.Abs(y - py);
-                })
-                .ThenBy(b => b.Position.X)
-                .ThenBy(b => b.Position.Y)
-                .ToList();
+                .OrderBy(b => Math.Abs((int)Math.Round(b.Position.X) - px) + Math.Abs((int)Math.Round(b.Position.Y) - py))
+                .ThenBy(b => b.Position.X).ThenBy(b => b.Position.Y).ToList();
 
             var box = boxes.FirstOrDefault();
             if (box != null)
             {
                 int dir = pull ? -1 : 1;
-                int movedSteps = 0;
+                int movedSteps = 0; // ✅ СЧЁТЧИК РЕАЛЬНЫХ ШАГОВ ЯЩИКА
 
                 for (int i = 0; i < strength; i++)
                 {
-                    if (!MoveBoxOneStep(box, px, py, dir))
-                    {
-                        MagnetBlocked = true;
-                        break;
-                    }
+                    if (!MoveBoxOneStep(box, px, py, dir)) { MagnetBlocked = true; break; }
                     movedSteps++;
                     IsBoxMoving = true;
                 }
 
                 if (movedSteps > 0)
                 {
+                    AddBlinkingEffect(box);
                     BoxMoved?.Invoke(this, EventArgs.Empty);
+
+                    // ✅ АЧИВКА: если ящик пролетел 4+ клетки за одно нажатие
+                    if (movedSteps >= 4) AchievementManager.OnMagnetUsed(movedSteps);
+                }
+
+                if (pull)
+                {
+                    int bx = (int)Math.Round(box.Position.X);
+                    int by = (int)Math.Round(box.Position.Y);
+                    int distance = Math.Abs(bx - px) + Math.Abs(by - py);
+
+                    if (distance <= 2) BoxHit?.Invoke(this, new BoxHitEventArgs { Box = box, Player = Player });
                 }
             }
         }
@@ -142,124 +138,52 @@ namespace MagnitArena.Model
             int by = (int)Math.Round(box.Position.Y);
             int dx = bx - px;
             int dy = by - py;
-
             if (dx == 0 && dy == 0) return false;
 
             int mx = 0, my = 0;
             if (dx == 0) my = dy > 0 ? 1 : -1;
             else if (dy == 0) mx = dx > 0 ? 1 : -1;
-            else
-            {
-                if (Math.Abs(dx) > Math.Abs(dy)) mx = dx > 0 ? 1 : -1;
-                else my = dy > 0 ? 1 : -1;
-            }
+            else { if (Math.Abs(dx) > Math.Abs(dy)) mx = dx > 0 ? 1 : -1; else my = dy > 0 ? 1 : -1; }
 
-            mx *= dir;
-            my *= dir;
-
-            int nx = bx + mx;
-            int ny = by + my;
-
-            return TryMoveBox(box, nx, ny, mx, my);
+            mx *= dir; my *= dir;
+            return TryMoveBox(box, bx + mx, by + my, mx, my);
         }
 
         private bool TryMoveBox(Box box, int tx, int ty, int mx, int my)
         {
             if (tx < 0 || tx >= WIDTH || ty < 0 || ty >= HEIGHT) return false;
-
-            foreach (var w in Walls)
-                if ((int)Math.Round(w.X) == tx && (int)Math.Round(w.Y) == ty)
-                    return false;
-
-            if (Player != null)
-            {
-                var px = (int)Math.Round(Player.Position.X);
-                var py = (int)Math.Round(Player.Position.Y);
-                if (tx == px && ty == py) return false;
-            }
-
-            foreach (var b in Boxes.Where(o => o != box && !o.IsRemoved))
-            {
-                var bx = (int)Math.Round(b.Position.X);
-                var by = (int)Math.Round(b.Position.Y);
-                if (tx == bx && ty == by) return false;
-            }
+            foreach (var w in Walls) if ((int)Math.Round(w.X) == tx && (int)Math.Round(w.Y) == ty) return false;
+            if (Player != null) { var pp = Player.Position; if ((int)Math.Round(pp.X) == tx && (int)Math.Round(pp.Y) == ty) return false; }
+            foreach (var b in Boxes.Where(o => o != box && !o.IsRemoved)) { var bp = b.Position; if ((int)Math.Round(bp.X) == tx && (int)Math.Round(bp.Y) == ty) return false; }
 
             Enemy enemy = null;
-            foreach (var e in Enemies.Where(o => !o.IsRemoved))
-            {
-                var ex = (int)Math.Round(e.Position.X);
-                var ey = (int)Math.Round(e.Position.Y);
-                if (tx == ex && ty == ey)
-                {
-                    enemy = e;
-                    break;
-                }
-            }
+            foreach (var e in Enemies.Where(o => !o.IsRemoved)) { var ep = e.Position; if ((int)Math.Round(ep.X) == tx && (int)Math.Round(ep.Y) == ty) { enemy = e; break; } }
 
             if (enemy != null)
             {
-                int enx = tx + mx;
-                int eny = ty + my;
-                if (!CanEnemyMove(enemy, enx, eny)) return false;
-                box.Position = new Vector2(tx, ty);
-                box.Velocity = new Vector2(0, 0);
-                enemy.Position = new Vector2(enx, eny);
-                enemy.Velocity = new Vector2(0, 0);
+                if (!CanEnemyMove(enemy, tx + mx, ty + my)) return false;
+                box.Position = new Vector2(tx, ty); box.Velocity = new Vector2(0, 0);
+                enemy.Position = new Vector2(tx + mx, ty + my); enemy.Velocity = new Vector2(0, 0);
                 return true;
             }
 
-            box.Position = new Vector2(tx, ty);
-            box.Velocity = new Vector2(0, 0);
+            box.Position = new Vector2(tx, ty); box.Velocity = new Vector2(0, 0);
             return true;
         }
 
         private bool CanEnemyMove(Enemy e, int x, int y)
         {
             if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return false;
-
-            if (Player != null)
-            {
-                var px = (int)Math.Round(Player.Position.X);
-                var py = (int)Math.Round(Player.Position.Y);
-                if (x == px && y == py) return false;
-            }
-
-            foreach (var w in Walls)
-                if ((int)Math.Round(w.X) == x && (int)Math.Round(w.Y) == y)
-                    return false;
-
-            foreach (var b in Boxes.Where(o => !o.IsRemoved))
-            {
-                var bx = (int)Math.Round(b.Position.X);
-                var by = (int)Math.Round(b.Position.Y);
-                if (x == bx && y == by) return false;
-            }
-
-            foreach (var o in Enemies.Where(en => en != e && !en.IsRemoved))
-            {
-                var ex = (int)Math.Round(o.Position.X);
-                var ey = (int)Math.Round(o.Position.Y);
-                if (x == ex && y == ey) return false;
-            }
-
+            if (Player != null) { var pp = Player.Position; if ((int)Math.Round(pp.X) == x && (int)Math.Round(pp.Y) == y) return false; }
+            foreach (var w in Walls) if ((int)Math.Round(w.X) == x && (int)Math.Round(w.Y) == y) return false;
+            foreach (var b in Boxes.Where(o => !o.IsRemoved)) { var bp = b.Position; if ((int)Math.Round(bp.X) == x && (int)Math.Round(bp.Y) == y) return false; }
+            foreach (var o in Enemies.Where(en => en != e && !en.IsRemoved)) { var op = o.Position; if ((int)Math.Round(op.X) == x && (int)Math.Round(op.Y) == y) return false; }
             return true;
         }
 
-        public void RegisterPlayerMove()
-        {
-            _lastPlayerMove = DateTime.Now;
-        }
-
-        public bool CanPlayerMove()
-        {
-            return (DateTime.Now - _lastPlayerMove).TotalMilliseconds >= 150;
-        }
-
-        public void ResetMagnetBlocked()
-        {
-            MagnetBlocked = false;
-        }
+        public void RegisterPlayerMove() => _lastPlayerMove = DateTime.Now;
+        public bool CanPlayerMove() => (DateTime.Now - _lastPlayerMove).TotalMilliseconds >= 150;
+        public void ResetMagnetBlocked() => MagnetBlocked = false;
 
         public void CheckCollisions()
         {
@@ -297,53 +221,44 @@ namespace MagnitArena.Model
 
             foreach (var e in Enemies.Where(o => !o.IsRemoved))
             {
-                var ex = (int)Math.Round(e.Position.X);
-                var ey = (int)Math.Round(e.Position.Y);
+                int ex = (int)Math.Round(e.Position.X);
+                int ey = (int)Math.Round(e.Position.Y);
 
-                bool inCorner = (ex == 0 || ex == WIDTH - 1) && (ey == 0 || ey == HEIGHT - 1);
+                bool atLeftEdge = (ex == 0);
+                bool atRightEdge = (ex == WIDTH - 1);
+                bool atTopEdge = (ey == 0);
+                bool atBottomEdge = (ey == HEIGHT - 1);
 
-                if (inCorner)
+                if (atLeftEdge || atRightEdge || atTopEdge || atBottomEdge)
                 {
-                    var pos = new Vector2(ex, ey);
-                    if (!Pits.Contains(pos))
-                    {
-                        State = GameState.Lost;
-                        return;
-                    }
-                }
+                    bool canPushAway = false;
 
-                bool atEdge = (ex == 0 || ex == WIDTH - 1 || ey == 0 || ey == HEIGHT - 1);
-
-                if (atEdge && !inCorner)
-                {
-                    bool canPushToCenter = true;
-
-                    if (ex == 0)
+                    if (atLeftEdge)
                     {
                         var checkPos = new Vector2(ex + 1, ey);
-                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex + 1 && (int)Math.Round(b.Position.Y) == ey && !b.IsRemoved))
-                            canPushToCenter = false;
+                        if (!Walls.Contains(checkPos) && !Boxes.Any(b => (int)Math.Round(b.Position.X) == checkPos.X && (int)Math.Round(b.Position.Y) == checkPos.Y && !b.IsRemoved))
+                            canPushAway = true;
                     }
-                    else if (ex == WIDTH - 1)
+                    else if (atRightEdge)
                     {
                         var checkPos = new Vector2(ex - 1, ey);
-                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex - 1 && (int)Math.Round(b.Position.Y) == ey && !b.IsRemoved))
-                            canPushToCenter = false;
+                        if (!Walls.Contains(checkPos) && !Boxes.Any(b => (int)Math.Round(b.Position.X) == checkPos.X && (int)Math.Round(b.Position.Y) == checkPos.Y && !b.IsRemoved))
+                            canPushAway = true;
                     }
-                    else if (ey == 0)
+                    else if (atTopEdge)
                     {
                         var checkPos = new Vector2(ex, ey + 1);
-                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex && (int)Math.Round(b.Position.Y) == ey + 1 && !b.IsRemoved))
-                            canPushToCenter = false;
+                        if (!Walls.Contains(checkPos) && !Boxes.Any(b => (int)Math.Round(b.Position.X) == checkPos.X && (int)Math.Round(b.Position.Y) == checkPos.Y && !b.IsRemoved))
+                            canPushAway = true;
                     }
-                    else if (ey == HEIGHT - 1)
+                    else if (atBottomEdge)
                     {
                         var checkPos = new Vector2(ex, ey - 1);
-                        if (Walls.Contains(checkPos) || Boxes.Any(b => (int)Math.Round(b.Position.X) == ex && (int)Math.Round(b.Position.Y) == ey - 1 && !b.IsRemoved))
-                            canPushToCenter = false;
+                        if (!Walls.Contains(checkPos) && !Boxes.Any(b => (int)Math.Round(b.Position.X) == checkPos.X && (int)Math.Round(b.Position.Y) == checkPos.Y && !b.IsRemoved))
+                            canPushAway = true;
                     }
 
-                    if (!canPushToCenter)
+                    if (!canPushAway)
                     {
                         State = GameState.Lost;
                         return;
@@ -367,59 +282,26 @@ namespace MagnitArena.Model
         private void CheckWinCondition()
         {
             if (State == GameState.Lost) return;
-
-            if (Enemies.Any(e => !e.IsRemoved))
-            {
-                State = GameState.Playing;
-                return;
-            }
-
+            if (Enemies.Any(e => !e.IsRemoved)) { State = GameState.Playing; return; }
             var boxes = Boxes.Where(b => !b.IsRemoved).ToList();
-            if (boxes.Count == 0)
-            {
-                State = GameState.Playing;
-                return;
-            }
+            if (boxes.Count == 0) { State = GameState.Playing; return; }
 
-            int inZone = 0;
-            foreach (var b in boxes)
-            {
-                var p = new Vector2(
-                    (int)Math.Round(b.Position.X),
-                    (int)Math.Round(b.Position.Y)
-                );
-                if (Zones.Contains(p)) inZone++;
-            }
-
-            State = (inZone == boxes.Count && inZone == Zones.Count)
-                ? GameState.Won
-                : GameState.Playing;
+            int inZone = boxes.Count(b => Zones.Contains(new Vector2((int)Math.Round(b.Position.X), (int)Math.Round(b.Position.Y))));
+            State = (inZone == boxes.Count && inZone == Zones.Count) ? GameState.Won : GameState.Playing;
         }
 
         public bool CheckWin()
         {
             if (Enemies.Any(e => !e.IsRemoved)) return false;
             var boxes = Boxes.Count(b => !b.IsRemoved);
-            int inZone = 0;
-            foreach (var b in Boxes.Where(o => !o.IsRemoved))
-            {
-                var p = new Vector2(
-                    (int)Math.Round(b.Position.X),
-                    (int)Math.Round(b.Position.Y)
-                );
-                if (Zones.Contains(p)) inZone++;
-            }
+            int inZone = Boxes.Where(b => !b.IsRemoved).Count(b => Zones.Contains(new Vector2((int)Math.Round(b.Position.X), (int)Math.Round(b.Position.Y))));
             return inZone == boxes && inZone == Zones.Count;
         }
 
-        public void NextLevel()
-        {
-            if (CurrentLevel < TotalLevels)
-                LoadLevel(CurrentLevel);
-            else
-                State = GameState.Won;
-        }
-
+        public void NextLevel() { if (CurrentLevel < TotalLevels) LoadLevel(CurrentLevel); else State = GameState.Won; }
         public void RestartLevel() => LoadLevel(CurrentLevel - 1);
+        private void AddBlinkingEffect(GameObject obj) => ObjectBlinking?.Invoke(this, obj);
     }
+
+    public class BoxHitEventArgs : EventArgs { public Box Box { get; set; } public Player Player { get; set; } }
 }
